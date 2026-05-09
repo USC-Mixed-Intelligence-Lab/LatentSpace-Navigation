@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Latent Space Navigator</title>
+  <meta name="description" content="Explore a diffusion model's latent space in real-time using hand gestures or a controller.">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <!-- ============ Header ============ -->
+  <header id="header">
+    <div class="header-left">
+      <h1 class="logo">
+        <span class="logo-icon">◈</span>
+        Latent Space Navigator
+      </h1>
+    </div>
+    <div class="header-right">
+      <span id="status-text" class="status-badge">Disconnected</span>
+      <button id="settings-toggle" class="icon-btn" title="Settings">⚙</button>
+    </div>
+  </header>
+
+  <!-- ============ Main Layout ============ -->
+  <main id="main">
+
+    <!-- Left: Image Canvas -->
+    <section id="canvas-section">
+      <div id="image-container">
+        <img id="generated-image" alt="Generated image">
+        <img id="generated-image-back" alt="" class="back-layer">
+        <div id="image-placeholder">
+          <span class="placeholder-icon">✦</span>
+          <p>Enter a prompt to begin exploring</p>
+        </div>
+      </div>
+
+      <!-- Webcam PiP -->
+      <div id="webcam-pip" class="hidden">
+        <video id="webcam-video" autoplay playsinline muted></video>
+        <canvas id="hand-overlay"></canvas>
+      </div>
+
+      <!-- Perf readout -->
+      <div id="perf-bar">
+        <span id="perf-gen">— ms</span>
+        <span id="perf-mode">—</span>
+        <span id="perf-res">—</span>
+      </div>
+    </section>
+
+    <!-- Right: Controls -->
+    <aside id="controls">
+
+      <!-- Prompt -->
+      <div class="panel" id="prompt-panel">
+        <label class="panel-label" for="prompt-input">Prompt</label>
+        <div class="prompt-row">
+          <input type="text" id="prompt-input" placeholder="Enter the void..." autocomplete="off">
+          <button id="prompt-submit" class="btn-primary">Go</button>
+        </div>
+      </div>
+
+      <!-- Axes -->
+      <div class="panel" id="axes-panel">
+        <div class="panel-header">
+          <span class="panel-label">Axes</span>
+          <span class="panel-hint">click label to edit</span>
+        </div>
+        <div id="axes-list">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- Radar Visualizer -->
+      <div class="panel" id="radar-panel">
+        <canvas id="radar-canvas" width="220" height="220"></canvas>
+      </div>
+
+      <!-- Input Mode -->
+      <div class="panel" id="input-panel">
+        <span class="panel-label">Input</span>
+        <div class="input-mode-row">
+          <button class="mode-btn active" data-mode="sliders" id="mode-sliders" title="Manual sliders">🎚️</button>
+          <button class="mode-btn" data-mode="hand" id="mode-hand" title="Hand tracking">🖐️</button>
+          <button class="mode-btn" data-mode="gamepad" id="mode-gamepad" title="Controller">🎮</button>
+        </div>
+        <div id="input-status" class="input-status-text">Using manual sliders</div>
+      </div>
+
+      <!-- Settings (collapsible) -->
+      <div class="panel collapsible" id="settings-panel">
+        <div class="panel-label">Settings</div>
+        <div class="settings-grid">
+          <label for="seed-input">Seed</label>
+          <input type="number" id="seed-input" value="42" min="0" step="1">
+
+          <label for="scale-slider">Scale</label>
+          <div class="setting-row">
+            <input type="range" id="scale-slider" min="0.1" max="5.0" step="0.1" value="1.5">
+            <span id="scale-value" class="mono">1.5</span>
+          </div>
+
+          <label for="smooth-slider">Smoothing</label>
+          <div class="setting-row">
+            <input type="range" id="smooth-slider" min="0.01" max="0.5" step="0.01" value="0.15">
+            <span id="smooth-value" class="mono">0.15</span>
+          </div>
+        </div>
+        <button id="render-hq-btn" class="btn-accent">✦ Render High Quality</button>
+      </div>
+
+    </aside>
+  </main>
+
+  <!-- MediaPipe -->
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+torch>=2.1
+diffusers @ git+https://github.com/huggingface/diffusers.git
+transformers
+accelerate
+fastapi
+uvicorn[standard]
+websockets
+google-genai
+pydantic>=2.0
+Pillow
+python-dotenv
