@@ -551,6 +551,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
   color: var(--text-secondary);
 }
 
+.setting-hint {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
 .settings-grid input[type="number"] {
   background: var(--bg-input);
   border: 1px solid var(--border);

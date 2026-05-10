@@ -48,6 +48,8 @@ const renderHqBtn    = $("#render-hq-btn");
 const settingsToggle = $("#settings-toggle");
 const settingsPanel  = $("#settings-panel");
 const inputStatus    = $("#input-status");
+const jumpSpeedSlider = $("#jump-speed-slider");
+const jumpSpeedValue  = $("#jump-speed-value");
 
 // ============================================================
 // State
@@ -668,6 +670,12 @@ scaleSlider.addEventListener("input", () => {
 
 smoothSlider.addEventListener("input", () => {
   smoothValue.textContent = parseFloat(smoothSlider.value).toFixed(2);
+});
+
+jumpSpeedSlider.addEventListener("input", () => {
+  const steps = parseInt(jumpSpeedSlider.value);
+  jumpSpeedValue.textContent = steps;
+  wsSend({ type: "set_jump_steps", steps });
 });
 
 seedInput.addEventListener("change", () => {

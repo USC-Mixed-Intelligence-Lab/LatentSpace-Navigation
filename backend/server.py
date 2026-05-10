@@ -80,6 +80,7 @@ async def websocket_endpoint(ws: WebSocket):
     anchor_data = []
     generating = False
     jumping = False
+    jump_steps = 4  # number of transition frames (configurable)
 
     async def send_status(msg: str):
         await ws.send_text(json.dumps({"type": "status", "msg": msg}))
@@ -199,11 +200,13 @@ async def websocket_endpoint(ws: WebSocket):
 
                     # Start transition
                     get_engine().start_jump(anchor_idx)
+                    step_size = 1.0 / max(jump_steps, 1)
 
-                    # Run 10-frame LERP transition
-                    for step in range(10):
-                        done = get_engine().step_transition(step_size=0.1)
-                        embeds = get_engine().compute_embedding(smoothed, scale)
+                    # Run N-frame LERP transition (zeroed local coefficients)
+                    zero_coeffs = [0.0] * 6
+                    for step in range(jump_steps):
+                        done = get_engine().step_transition(step_size=step_size)
+                        embeds = get_engine().compute_embedding(zero_coeffs, scale)
                         jpeg = await loop.run_in_executor(
                             None, get_engine().generate, embeds, "preview"
                         )
@@ -288,6 +291,10 @@ async def websocket_endpoint(ws: WebSocket):
             elif msg_type == "set_scale":
                 scale = float(msg["scale"])
                 await send_status(f"Scale set to {scale:.2f}.")
+
+            elif msg_type == "set_jump_steps":
+                jump_steps = max(1, min(10, int(msg["steps"])))
+                await send_status(f"Jump speed: {jump_steps} frames.")
 
     except WebSocketDisconnect:
         print("[server] Client disconnected.")

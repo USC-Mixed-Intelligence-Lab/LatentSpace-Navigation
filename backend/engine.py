@@ -239,6 +239,11 @@ class LatentEngine:
     # Embedding math
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _ease_out(t: float) -> float:
+        """Ease-out curve: starts fast, slows down near the end."""
+        return 1.0 - (1.0 - t) ** 2
+
     def compute_embedding(
         self, coefficients: list[float], scale: float = 1.0
     ) -> torch.Tensor:
@@ -246,8 +251,8 @@ class LatentEngine:
         Compute the navigated embedding:
             E_current = E_center + scale * Σ αᵢ · dᵢ
 
-        During a transition, E_center is interpolated toward the target:
-            E_center_eff = lerp(E_center, E_target, transition_progress)
+        During a transition, E_center is interpolated toward the target
+        using an ease-out curve for visually snappy jumps.
 
         coefficients: list of 6 floats (one per axis)
         scale: global multiplier
@@ -258,7 +263,7 @@ class LatentEngine:
 
         # Effective center: interpolated during transitions
         if self.transition_progress is not None and self.transition_target is not None:
-            t = self.transition_progress
+            t = self._ease_out(self.transition_progress)
             center = (1.0 - t) * self.center_embedding + t * self.transition_target
         else:
             center = self.center_embedding
