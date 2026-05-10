@@ -56,7 +56,7 @@ Open `http://localhost:8765` in your browser.
 !pip install -r backend/requirements.txt
 !pip install pyngrok
 
-# Set API key
+# Set API keys
 import os
 os.environ["GOOGLE_API_KEY"] = "your-key-here"
 
@@ -64,11 +64,19 @@ os.environ["GOOGLE_API_KEY"] = "your-key-here"
 import subprocess
 proc = subprocess.Popen(["python", "backend/server.py", "--device", "cuda"])
 
-# Expose via ngrok
+# Expose via ngrok (requires free account: https://dashboard.ngrok.com/signup)
 from pyngrok import ngrok
+ngrok.set_auth_token(os.environ.get("NGROK_AUTHTOKEN", "your-ngrok-authtoken"))
 tunnel = ngrok.connect(8765)
 print(f"Open: {tunnel.public_url}")
 ```
+
+> **Note:** Get your free ngrok authtoken at https://dashboard.ngrok.com/get-started/your-authtoken.
+> You can set it as a [Colab secret](https://colab.research.google.com/) or pass it directly:
+> ```python
+> from google.colab import userdata
+> os.environ["NGROK_AUTHTOKEN"] = userdata.get("NGROK_AUTHTOKEN")
+> ```
 
 ### 4. Deploy to Cloud Run (GPU)
 
