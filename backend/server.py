@@ -3,6 +3,12 @@ Latent Space Navigator — WebSocket Server
 
 FastAPI application that serves the frontend and manages real-time
 WebSocket communication between the browser and the Flux engine.
+
+Architecture:
+  Two concurrent tasks per WebSocket connection:
+  - Receiver: reads messages into an asyncio.Queue (never blocks processing)
+  - Processor: pulls from queue, drains redundant move messages, processes
+    jump/control messages immediately without waiting behind stale moves
 """
 
 import argparse
@@ -78,9 +84,12 @@ async def websocket_endpoint(ws: WebSocket):
     base_prompt = ""
     axis_data = []
     anchor_data = []
-    generating = False
     jumping = False
     jump_steps = 4  # number of transition frames (configurable)
+
+    # Message queue: receiver puts messages here, processor consumes
+    msg_queue: asyncio.Queue = asyncio.Queue()
+    stop_event = asyncio.Event()
 
     async def send_status(msg: str):
         await ws.send_text(json.dumps({"type": "status", "msg": msg}))
@@ -94,10 +103,31 @@ async def websocket_endpoint(ws: WebSocket):
     async def send_image(jpeg_bytes: bytes):
         await ws.send_bytes(jpeg_bytes)
 
-    try:
-        while True:
-            raw = await ws.receive_text()
-            msg = json.loads(raw)
+    # ---- Receiver task: reads WebSocket → queue ----
+    async def receiver():
+        try:
+            while True:
+                raw = await ws.receive_text()
+                await msg_queue.put(json.loads(raw))
+        except WebSocketDisconnect:
+            print("[server] Client disconnected.")
+            stop_event.set()
+            await msg_queue.put(None)  # sentinel
+        except Exception as e:
+            print(f"[server] Receiver error: {e}")
+            stop_event.set()
+            await msg_queue.put(None)
+
+    # ---- Processor task: consumes queue ----
+    async def processor():
+        nonlocal smoothed, scale, base_prompt, axis_data, anchor_data
+        nonlocal jumping, jump_steps
+
+        while not stop_event.is_set():
+            msg = await msg_queue.get()
+            if msg is None:
+                break
+
             msg_type = msg.get("type")
 
             # ---- Initialize with base prompt ----
@@ -140,35 +170,51 @@ async def websocket_endpoint(ws: WebSocket):
 
             # ---- Controller movement ----
             elif msg_type == "move":
-                if generating or jumping:
-                    continue  # skip if still generating previous frame
+                if jumping:
+                    continue  # skip moves during a jump
 
+                # Drain queue: discard stale moves, keep latest coefficients.
+                # If a non-move message appears (e.g. jump), put it back and stop.
                 coeffs = msg["coefficients"]
+                deferred = []
+                while not msg_queue.empty():
+                    try:
+                        peeked = msg_queue.get_nowait()
+                        if peeked is None:
+                            stop_event.set()
+                            break
+                        if peeked.get("type") == "move":
+                            coeffs = peeked["coefficients"]  # keep latest
+                        else:
+                            deferred.append(peeked)
+                            break  # stop draining at first control message
+                    except asyncio.QueueEmpty:
+                        break
 
-                # Use client values directly — the frontend already applies
-                # LERP smoothing before sending, so no server-side smoothing
-                # is needed (double-smoothing would dampen the signal to ~2%).
+                # Re-queue any non-move messages we found
+                for d in deferred:
+                    await msg_queue.put(d)
+
+                # Update state with latest coefficients (already smoothed
+                # by the frontend — no server-side LERP needed)
                 for i in range(len(smoothed)):
                     if i < len(coeffs):
                         smoothed[i] = coeffs[i]
 
-                generating = True
-                try:
-                    embeds = get_engine().compute_embedding(smoothed, scale)
-                    loop = asyncio.get_event_loop()
-                    t0 = time.time()
-                    jpeg = await loop.run_in_executor(
-                        None, get_engine().generate, embeds, "preview"
-                    )
-                    dt = time.time() - t0
-                    await send_image(jpeg)
-                    await ws.send_text(json.dumps({
-                        "type": "perf",
-                        "gen_ms": round(dt * 1000),
-                        "mode": "preview",
-                    }))
-                finally:
-                    generating = False
+                # Generate frame
+                embeds = get_engine().compute_embedding(smoothed, scale)
+                loop = asyncio.get_event_loop()
+                t0 = time.time()
+                jpeg = await loop.run_in_executor(
+                    None, get_engine().generate, embeds, "preview"
+                )
+                dt = time.time() - t0
+                await send_image(jpeg)
+                await ws.send_text(json.dumps({
+                    "type": "perf",
+                    "gen_ms": round(dt * 1000),
+                    "mode": "preview",
+                }))
 
             # ---- High-quality render ----
             elif msg_type == "render_hq":
@@ -295,8 +341,22 @@ async def websocket_endpoint(ws: WebSocket):
                 jump_steps = max(1, min(10, int(msg["steps"])))
                 await send_status(f"Jump speed: {jump_steps} frames.")
 
-    except WebSocketDisconnect:
-        print("[server] Client disconnected.")
+    # ---- Run both tasks concurrently ----
+    receiver_task = asyncio.create_task(receiver())
+    processor_task = asyncio.create_task(processor())
+
+    try:
+        # Wait for either task to finish (disconnect or error)
+        done, pending = await asyncio.wait(
+            [receiver_task, processor_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        # Re-raise any exceptions from completed tasks
+        for task in done:
+            if task.exception():
+                print(f"[server] Task error: {task.exception()}")
     except Exception as e:
         print(f"[server] Error: {e}")
         import traceback
