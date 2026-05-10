@@ -7,6 +7,11 @@ Gram-Schmidt orthogonalization, and dual-resolution image generation.
 Supports two navigation layers:
 - Local steering: fine-grained movement within a concept via orthogonal axes
 - Global jumping: LERP transition to a different concept anchor, then recenter
+
+IMPORTANT: Flux pipelines require BOTH `prompt_embeds` (sequence-level T5
+embeddings) AND `pooled_prompt_embeds` (CLIP pooled embeddings) to produce
+correctly conditioned images. We store every embedding as a
+(prompt_embeds, pooled_prompt_embeds) tuple throughout.
 """
 
 import io
@@ -65,18 +70,21 @@ class LatentEngine:
         self._warmup()
 
         # --- Navigation state: local steering ---
+        # Embeddings are (prompt_embeds, pooled_prompt_embeds) tuples
         self.base_embedding = None      # original prompt embedding (never changes)
         self.center_embedding = None    # current concept center (changes on jump)
         self.center_prompt = ""         # prompt string for the current center
-        self.directions = []            # orthogonalized local direction tensors
+        self.directions = []            # orthogonalized local direction tensors (prompt_embeds only)
+        self.pooled_center = None       # pooled embedding for the current center
 
         # --- Navigation state: global anchors ---
-        self.anchor_embeddings = []     # pre-encoded anchor embedding tensors
+        self.anchor_embeddings = []     # list of (prompt_embeds, pooled) tuples
         self.anchor_prompts = []        # anchor prompt strings (for recenter)
 
         # --- Transition state ---
         self.transition_progress = None     # None = not transitioning, 0.0→1.0
-        self.transition_target = None       # target embedding tensor
+        self.transition_target = None       # target prompt_embeds tensor
+        self.transition_target_pooled = None # target pooled tensor
         self.transition_target_prompt = ""  # target prompt string
 
     # ------------------------------------------------------------------
@@ -128,11 +136,15 @@ class LatentEngine:
     # Prompt encoding
     # ------------------------------------------------------------------
 
-    def encode_prompt(self, prompt: str) -> torch.Tensor:
-        """Encode a single prompt → embedding tensor (1, seq_len, hidden_dim)."""
+    def encode_prompt(self, prompt: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Encode a single prompt → (prompt_embeds, pooled_prompt_embeds).
+
+        Both tensors are required by the Flux pipeline for correct conditioning.
+        """
         with torch.inference_mode():
-            embeds, _ = self.pipe.encode_prompt(prompt)
-        return embeds
+            prompt_embeds, pooled_prompt_embeds = self.pipe.encode_prompt(prompt)
+        return prompt_embeds, pooled_prompt_embeds
 
     def encode_all(self, base_prompt: str, axis_pairs: list[dict]):
         """
@@ -144,16 +156,18 @@ class LatentEngine:
         """
         t0 = time.time()
         print(f"[engine] Encoding base prompt: '{base_prompt}'")
-        self.base_embedding = self.encode_prompt(base_prompt)
-        self.center_embedding = self.base_embedding.clone()
+        prompt_embeds, pooled = self.encode_prompt(base_prompt)
+        self.base_embedding = prompt_embeds.clone()
+        self.center_embedding = prompt_embeds.clone()
+        self.pooled_center = pooled.clone()
         self.center_prompt = base_prompt
 
         raw_directions = []
         for i, pair in enumerate(axis_pairs):
             label = pair.get("label", f"axis-{i}")
             print(f"[engine] Encoding axis {i + 1}/{len(axis_pairs)}: {label}")
-            e_pos = self.encode_prompt(pair["positive"])
-            e_neg = self.encode_prompt(pair["negative"])
+            e_pos, _ = self.encode_prompt(pair["positive"])
+            e_neg, _ = self.encode_prompt(pair["negative"])
             raw_directions.append(e_pos - e_neg)
 
         self.directions = self._gram_schmidt(raw_directions)
@@ -165,6 +179,7 @@ class LatentEngine:
         Encode all global concept anchors.
 
         anchor_data: list of {"label": str, "prompt": str}
+        Stores both prompt_embeds and pooled for each anchor.
         """
         t0 = time.time()
         self.anchor_embeddings = []
@@ -173,7 +188,8 @@ class LatentEngine:
             prompt = anchor["prompt"]
             label = anchor.get("label", f"anchor-{i}")
             print(f"[engine] Encoding anchor {i + 1}/{len(anchor_data)}: {label}")
-            self.anchor_embeddings.append(self.encode_prompt(prompt))
+            prompt_embeds, pooled = self.encode_prompt(prompt)
+            self.anchor_embeddings.append((prompt_embeds, pooled))
             self.anchor_prompts.append(prompt)
         dt = time.time() - t0
         print(f"[engine] Encoded {len(self.anchor_embeddings)} anchors in {dt:.1f}s")
@@ -186,8 +202,8 @@ class LatentEngine:
         We re-encode just this pair, then recompute all orthogonal directions
         (since later axes depend on earlier ones via Gram-Schmidt order).
         """
-        e_pos = self.encode_prompt(pair["positive"])
-        e_neg = self.encode_prompt(pair["negative"])
+        e_pos, _ = self.encode_prompt(pair["positive"])
+        e_neg, _ = self.encode_prompt(pair["negative"])
 
         # Rebuild raw directions: use existing orthogonalized ones as a base,
         # but replace the target index with the new raw direction.
@@ -246,17 +262,18 @@ class LatentEngine:
 
     def compute_embedding(
         self, coefficients: list[float], scale: float = 1.0
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Compute the navigated embedding:
+        Compute the navigated embedding pair:
             E_current = E_center + scale * Σ αᵢ · dᵢ
+            pooled_current = pooled_center (or interpolated during transition)
 
-        During a transition, E_center is interpolated toward the target
-        using an ease-out curve for visually snappy jumps.
+        During a transition, both E_center and pooled_center are interpolated
+        toward the target using an ease-out curve for visually snappy jumps.
 
         coefficients: list of 6 floats (one per axis)
         scale: global multiplier
-        Returns: tensor (1, seq_len, hidden_dim)
+        Returns: (prompt_embeds, pooled_prompt_embeds)
         """
         if self.center_embedding is None:
             raise RuntimeError("Call encode_all() first")
@@ -265,13 +282,15 @@ class LatentEngine:
         if self.transition_progress is not None and self.transition_target is not None:
             t = self._ease_out(self.transition_progress)
             center = (1.0 - t) * self.center_embedding + t * self.transition_target
+            pooled = (1.0 - t) * self.pooled_center + t * self.transition_target_pooled
         else:
             center = self.center_embedding
+            pooled = self.pooled_center
 
         e = center.clone()
         for alpha, d in zip(coefficients, self.directions):
             e = e + scale * alpha * d
-        return e
+        return e, pooled
 
     # ------------------------------------------------------------------
     # Global jump / transition
@@ -282,7 +301,9 @@ class LatentEngine:
         if anchor_index < 0 or anchor_index >= len(self.anchor_embeddings):
             raise ValueError(f"Invalid anchor index: {anchor_index}")
 
-        self.transition_target = self.anchor_embeddings[anchor_index]
+        prompt_embeds, pooled = self.anchor_embeddings[anchor_index]
+        self.transition_target = prompt_embeds
+        self.transition_target_pooled = pooled
         self.transition_target_prompt = self.anchor_prompts[anchor_index]
         self.transition_progress = 0.0
         print(f"[engine] Starting jump to anchor {anchor_index}: "
@@ -309,11 +330,13 @@ class LatentEngine:
         """
         if self.transition_target is not None:
             self.center_embedding = self.transition_target.clone()
+            self.pooled_center = self.transition_target_pooled.clone()
             self.center_prompt = self.transition_target_prompt
             print(f"[engine] Jump complete. New center: '{self.center_prompt[:60]}...'")
 
         self.transition_progress = None
         self.transition_target = None
+        self.transition_target_pooled = None
         self.transition_target_prompt = ""
 
     def recenter(self, new_axes: list[dict], new_anchors: list[dict]):
@@ -330,8 +353,8 @@ class LatentEngine:
         for i, pair in enumerate(new_axes):
             label = pair.get("label", f"axis-{i}")
             print(f"[engine] Re-encoding axis {i + 1}/{len(new_axes)}: {label}")
-            e_pos = self.encode_prompt(pair["positive"])
-            e_neg = self.encode_prompt(pair["negative"])
+            e_pos, _ = self.encode_prompt(pair["positive"])
+            e_neg, _ = self.encode_prompt(pair["negative"])
             raw_directions.append(e_pos - e_neg)
 
         self.directions = self._gram_schmidt(raw_directions)
@@ -347,7 +370,9 @@ class LatentEngine:
     # Image generation
     # ------------------------------------------------------------------
 
-    def generate(self, prompt_embeds: torch.Tensor, mode: str = "preview") -> bytes:
+    def generate(self, prompt_embeds: torch.Tensor,
+                 pooled_prompt_embeds: torch.Tensor,
+                 mode: str = "preview") -> bytes:
         """
         Generate an image from prompt embeddings and return JPEG bytes.
 
@@ -365,6 +390,7 @@ class LatentEngine:
         with torch.inference_mode():
             result = self.pipe(
                 prompt_embeds=prompt_embeds,
+                pooled_prompt_embeds=pooled_prompt_embeds,
                 height=size,
                 width=size,
                 num_inference_steps=steps,
