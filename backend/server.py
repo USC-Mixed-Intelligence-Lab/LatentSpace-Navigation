@@ -202,11 +202,10 @@ async def websocket_endpoint(ws: WebSocket):
                     get_engine().start_jump(anchor_idx)
                     step_size = 1.0 / max(jump_steps, 1)
 
-                    # Run N-frame LERP transition (zeroed local coefficients)
-                    zero_coeffs = [0.0] * 6
+                    # Run N-frame LERP transition (preserve current axis offsets)
                     for step in range(jump_steps):
                         done = get_engine().step_transition(step_size=step_size)
-                        embeds = get_engine().compute_embedding(zero_coeffs, scale)
+                        embeds = get_engine().compute_embedding(smoothed, scale)
                         jpeg = await loop.run_in_executor(
                             None, get_engine().generate, embeds, "preview"
                         )
@@ -238,9 +237,8 @@ async def websocket_endpoint(ws: WebSocket):
                     await send_axes(axis_data)
                     await send_anchors(anchor_data)
 
-                    # Reset sliders to origin and generate a frame at the new center
-                    smoothed = [0.0] * 6
-                    embeds = get_engine().compute_embedding([0.0] * 6, scale)
+                    # Generate a frame at the new center with current axis offsets
+                    embeds = get_engine().compute_embedding(smoothed, scale)
                     jpeg = await loop.run_in_executor(
                         None, get_engine().generate, embeds, "preview"
                     )
