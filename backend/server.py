@@ -85,7 +85,7 @@ async def websocket_endpoint(ws: WebSocket):
     axis_data = []
     anchor_data = []
     jumping = False
-    jump_steps = 4  # number of transition frames (configurable)
+    jump_steps = 30  # number of transition frames (configurable)
 
     # Message queue: receiver puts messages here, processor consumes
     msg_queue: asyncio.Queue = asyncio.Queue()
@@ -250,13 +250,20 @@ async def websocket_endpoint(ws: WebSocket):
                     step_size = 1.0 / max(jump_steps, 1)
 
                     # Run N-frame LERP transition (preserve current axis offsets)
+                    # ~300ms per frame → 30 frames ≈ 10s transition
+                    min_frame_ms = 300
                     for step in range(jump_steps):
+                        frame_t0 = time.time()
                         done = get_engine().step_transition(step_size=step_size)
                         embeds = get_engine().compute_embedding(smoothed, scale)
                         jpeg = await loop.run_in_executor(
                             None, get_engine().generate, embeds, "preview"
                         )
                         await send_image(jpeg)
+                        # Enforce minimum frame duration for artistic pacing
+                        elapsed_ms = (time.time() - frame_t0) * 1000
+                        if elapsed_ms < min_frame_ms:
+                            await asyncio.sleep((min_frame_ms - elapsed_ms) / 1000)
                         if done:
                             break
 
@@ -338,7 +345,7 @@ async def websocket_endpoint(ws: WebSocket):
                 await send_status(f"Scale set to {scale:.2f}.")
 
             elif msg_type == "set_jump_steps":
-                jump_steps = max(1, min(10, int(msg["steps"])))
+                jump_steps = max(5, min(60, int(msg["steps"])))
                 await send_status(f"Jump speed: {jump_steps} frames.")
 
     # ---- Run both tasks concurrently ----
