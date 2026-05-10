@@ -35,6 +35,7 @@ class LatentEngine:
         self.seed = seed
 
         # --- Load pipeline ---
+        torch.set_float32_matmul_precision("high")
         print("[engine] Loading Flux.2-klein-4B...")
         self.pipe = Flux2KleinPipeline.from_pretrained(
             "black-forest-labs/FLUX.2-klein-4B",
