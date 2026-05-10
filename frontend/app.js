@@ -27,6 +27,8 @@ const statusBadge    = $("#status-text");
 const promptInput    = $("#prompt-input");
 const promptSubmit   = $("#prompt-submit");
 const axesList       = $("#axes-list");
+const conceptsList   = $("#concepts-list");
+const currentConcept = $("#current-concept");
 const genImage       = $("#generated-image");
 const genImageBack   = $("#generated-image-back");
 const placeholder    = $("#image-placeholder");
@@ -64,6 +66,7 @@ let hqPending = false;
 let handLandmarker = null;
 let handRunning = false;
 let animFrameId = null;
+let jumping = false;
 
 // ============================================================
 // WebSocket
@@ -112,6 +115,25 @@ function handleServerMessage(msg) {
       break;
     case "axes":
       updateAxesUI(msg.axes);
+      break;
+    case "anchors":
+      updateConceptsUI(msg.anchors);
+      break;
+    case "jump_complete":
+      jumping = false;
+      enableConceptButtons(true);
+      // Reset slider UI to zero
+      coefficients.fill(0);
+      smoothed.fill(0);
+      for (let i = 0; i < NUM_AXES; i++) {
+        const slider = document.getElementById(`axis-slider-${i}`);
+        if (slider) slider.value = "0";
+      }
+      // Update current concept label
+      if (msg.prompt && currentConcept) {
+        currentConcept.textContent = `📍 ${msg.prompt.slice(0, 60)}`;
+        currentConcept.classList.add("visible");
+      }
       break;
     case "perf":
       perfGen.textContent = `${msg.gen_ms} ms`;
@@ -200,6 +222,44 @@ function updateAxesUI(axes) {
   });
 
   initialized = true;
+}
+
+// ============================================================
+// Concepts UI (global anchors)
+// ============================================================
+
+function updateConceptsUI(anchors) {
+  conceptsList.innerHTML = "";
+
+  if (!anchors || anchors.length === 0) {
+    conceptsList.innerHTML = '<p class="concepts-placeholder">No concept anchors available</p>';
+    return;
+  }
+
+  anchors.forEach((anchor, i) => {
+    const btn = document.createElement("button");
+    btn.className = "concept-btn";
+    btn.innerHTML = `
+      <span class="concept-label">${anchor.label}</span>
+      <span class="concept-prompt">${anchor.prompt.slice(0, 50)}…</span>
+    `;
+    btn.title = anchor.prompt;
+    btn.addEventListener("click", () => sendJump(i));
+    conceptsList.appendChild(btn);
+  });
+}
+
+function sendJump(index) {
+  if (!connected || jumping) return;
+  jumping = true;
+  enableConceptButtons(false);
+  wsSend({ type: "jump", index });
+}
+
+function enableConceptButtons(enabled) {
+  conceptsList.querySelectorAll(".concept-btn").forEach((btn) => {
+    btn.disabled = !enabled;
+  });
 }
 
 function startEditLabel(index, labelEl) {
@@ -574,6 +634,11 @@ promptSubmit.addEventListener("click", () => {
     // Reset coefficients
     coefficients.fill(0);
     smoothed.fill(0);
+    // Update current concept label
+    if (currentConcept) {
+      currentConcept.textContent = `📍 ${prompt.slice(0, 60)}`;
+      currentConcept.classList.add("visible");
+    }
   }
 });
 

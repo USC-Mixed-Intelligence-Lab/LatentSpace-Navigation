@@ -77,13 +77,18 @@ async def websocket_endpoint(ws: WebSocket):
     scale = 1.5
     base_prompt = ""
     axis_data = []
+    anchor_data = []
     generating = False
+    jumping = False
 
     async def send_status(msg: str):
         await ws.send_text(json.dumps({"type": "status", "msg": msg}))
 
     async def send_axes(axes: list[dict]):
         await ws.send_text(json.dumps({"type": "axes", "axes": axes}))
+
+    async def send_anchors(anchors: list[dict]):
+        await ws.send_text(json.dumps({"type": "anchors", "anchors": anchors}))
 
     async def send_image(jpeg_bytes: bytes):
         await ws.send_bytes(jpeg_bytes)
@@ -97,22 +102,32 @@ async def websocket_endpoint(ws: WebSocket):
             # ---- Initialize with base prompt ----
             if msg_type == "init":
                 base_prompt = msg["prompt"]
-                await send_status("Generating semantic axes...")
-
-                # Generate axis pairs via Gemini
                 loop = asyncio.get_event_loop()
+
+                # --- Generate local axes via Gemini ---
+                await send_status("Generating semantic axes...")
                 axis_data = await loop.run_in_executor(
                     None, get_axes_module().generate_axes, base_prompt
                 )
                 await send_axes(axis_data)
-                await send_status("Encoding prompts & building directions...")
 
-                # Encode all prompts and orthogonalize
+                # --- Generate global anchors via Gemini ---
+                await send_status("Generating concept anchors...")
+                anchor_data = await loop.run_in_executor(
+                    None, get_axes_module().generate_anchors, base_prompt
+                )
+                await send_anchors(anchor_data)
+
+                # --- Encode everything ---
+                await send_status("Encoding prompts & building directions...")
                 await loop.run_in_executor(
                     None, get_engine().encode_all, base_prompt, axis_data
                 )
+                await loop.run_in_executor(
+                    None, get_engine().encode_anchors, anchor_data
+                )
 
-                # Generate initial image at origin
+                # --- Generate initial image at origin ---
                 await send_status("Generating base image...")
                 embeds = get_engine().compute_embedding([0.0] * 6, scale)
                 jpeg = await loop.run_in_executor(
@@ -124,7 +139,7 @@ async def websocket_endpoint(ws: WebSocket):
 
             # ---- Controller movement ----
             elif msg_type == "move":
-                if generating:
+                if generating or jumping:
                     continue  # skip if still generating previous frame
 
                 coeffs = msg["coefficients"]
@@ -171,6 +186,71 @@ async def websocket_endpoint(ws: WebSocket):
                 }))
                 await send_status("High-quality render complete.")
 
+            # ---- Global concept jump ----
+            elif msg_type == "jump":
+                if jumping:
+                    continue
+                jumping = True
+                try:
+                    anchor_idx = msg["index"]
+                    anchor_label = anchor_data[anchor_idx].get("label", f"anchor-{anchor_idx}")
+                    await send_status(f"Jumping to: {anchor_label}...")
+                    loop = asyncio.get_event_loop()
+
+                    # Start transition
+                    get_engine().start_jump(anchor_idx)
+
+                    # Run 10-frame LERP transition
+                    for step in range(10):
+                        done = get_engine().step_transition(step_size=0.1)
+                        embeds = get_engine().compute_embedding(smoothed, scale)
+                        jpeg = await loop.run_in_executor(
+                            None, get_engine().generate, embeds, "preview"
+                        )
+                        await send_image(jpeg)
+                        if done:
+                            break
+
+                    # Finalize jump
+                    get_engine().complete_jump()
+                    new_center_prompt = get_engine().center_prompt
+
+                    # Regenerate local axes + global anchors around new center
+                    await send_status("Recentering — generating new axes...")
+                    axis_data = await loop.run_in_executor(
+                        None, get_axes_module().generate_axes, new_center_prompt
+                    )
+                    await send_status("Recentering — generating new anchors...")
+                    anchor_data = await loop.run_in_executor(
+                        None, get_axes_module().generate_anchors, new_center_prompt
+                    )
+
+                    # Re-encode directions and anchors
+                    await send_status("Recentering — encoding...")
+                    await loop.run_in_executor(
+                        None, get_engine().recenter, axis_data, anchor_data
+                    )
+
+                    # Send updated UI data
+                    await send_axes(axis_data)
+                    await send_anchors(anchor_data)
+
+                    # Reset sliders to origin and generate a frame at the new center
+                    smoothed = [0.0] * 6
+                    embeds = get_engine().compute_embedding([0.0] * 6, scale)
+                    jpeg = await loop.run_in_executor(
+                        None, get_engine().generate, embeds, "preview"
+                    )
+                    await send_image(jpeg)
+
+                    await ws.send_text(json.dumps({
+                        "type": "jump_complete",
+                        "prompt": new_center_prompt,
+                    }))
+                    await send_status(f"Arrived at: {anchor_label}")
+                finally:
+                    jumping = False
+
             # ---- Update a single axis ----
             elif msg_type == "update_axis":
                 idx = msg["index"]
@@ -178,10 +258,11 @@ async def websocket_endpoint(ws: WebSocket):
                 await send_status(f"Regenerating axis: {label}...")
 
                 loop = asyncio.get_event_loop()
+                current_prompt = get_engine().center_prompt or base_prompt
                 new_pair = await loop.run_in_executor(
                     None,
                     get_axes_module().regenerate_axis,
-                    base_prompt,
+                    current_prompt,
                     label,
                 )
                 axis_data[idx] = new_pair

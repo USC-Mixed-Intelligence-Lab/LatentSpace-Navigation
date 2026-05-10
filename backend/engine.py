@@ -3,6 +3,10 @@ Latent Space Navigator — Engine
 
 Manages the Flux.2-klein-4B pipeline, prompt embedding math,
 Gram-Schmidt orthogonalization, and dual-resolution image generation.
+
+Supports two navigation layers:
+- Local steering: fine-grained movement within a concept via orthogonal axes
+- Global jumping: LERP transition to a different concept anchor, then recenter
 """
 
 import io
@@ -22,6 +26,7 @@ class LatentEngine:
     - Direction vector computation (paired prompts → normalized deltas)
     - Gram-Schmidt orthogonalization of direction vectors
     - Fixed-seed image generation at preview (256²) and final (1024²) resolution
+    - Global concept anchors + LERP transitions between concept centers
     """
 
     PREVIEW_SIZE = 256
@@ -59,9 +64,20 @@ class LatentEngine:
         # --- Warmup both resolutions ---
         self._warmup()
 
-        # --- Navigation state ---
-        self.base_embedding = None
-        self.directions = []  # list of orthogonalized direction tensors
+        # --- Navigation state: local steering ---
+        self.base_embedding = None      # original prompt embedding (never changes)
+        self.center_embedding = None    # current concept center (changes on jump)
+        self.center_prompt = ""         # prompt string for the current center
+        self.directions = []            # orthogonalized local direction tensors
+
+        # --- Navigation state: global anchors ---
+        self.anchor_embeddings = []     # pre-encoded anchor embedding tensors
+        self.anchor_prompts = []        # anchor prompt strings (for recenter)
+
+        # --- Transition state ---
+        self.transition_progress = None     # None = not transitioning, 0.0→1.0
+        self.transition_target = None       # target embedding tensor
+        self.transition_target_prompt = ""  # target prompt string
 
     # ------------------------------------------------------------------
     # Latent noise
@@ -122,11 +138,15 @@ class LatentEngine:
         """
         Encode the base prompt and all axis pairs, then orthogonalize.
 
+        Also sets center_embedding = base_embedding (initial concept center).
+
         axis_pairs: list of {"label": str, "positive": str, "negative": str}
         """
         t0 = time.time()
         print(f"[engine] Encoding base prompt: '{base_prompt}'")
         self.base_embedding = self.encode_prompt(base_prompt)
+        self.center_embedding = self.base_embedding.clone()
+        self.center_prompt = base_prompt
 
         raw_directions = []
         for i, pair in enumerate(axis_pairs):
@@ -139,6 +159,24 @@ class LatentEngine:
         self.directions = self._gram_schmidt(raw_directions)
         dt = time.time() - t0
         print(f"[engine] Encoded + orthogonalized {len(self.directions)} axes in {dt:.1f}s")
+
+    def encode_anchors(self, anchor_data: list[dict]):
+        """
+        Encode all global concept anchors.
+
+        anchor_data: list of {"label": str, "prompt": str}
+        """
+        t0 = time.time()
+        self.anchor_embeddings = []
+        self.anchor_prompts = []
+        for i, anchor in enumerate(anchor_data):
+            prompt = anchor["prompt"]
+            label = anchor.get("label", f"anchor-{i}")
+            print(f"[engine] Encoding anchor {i + 1}/{len(anchor_data)}: {label}")
+            self.anchor_embeddings.append(self.encode_prompt(prompt))
+            self.anchor_prompts.append(prompt)
+        dt = time.time() - t0
+        print(f"[engine] Encoded {len(self.anchor_embeddings)} anchors in {dt:.1f}s")
 
     def replace_axis(self, index: int, pair: dict):
         """
@@ -206,19 +244,99 @@ class LatentEngine:
     ) -> torch.Tensor:
         """
         Compute the navigated embedding:
-            E_current = E_base + scale * Σ αᵢ · dᵢ
+            E_current = E_center + scale * Σ αᵢ · dᵢ
+
+        During a transition, E_center is interpolated toward the target:
+            E_center_eff = lerp(E_center, E_target, transition_progress)
 
         coefficients: list of 6 floats (one per axis)
         scale: global multiplier
         Returns: tensor (1, seq_len, hidden_dim)
         """
-        if self.base_embedding is None:
+        if self.center_embedding is None:
             raise RuntimeError("Call encode_all() first")
 
-        e = self.base_embedding.clone()
+        # Effective center: interpolated during transitions
+        if self.transition_progress is not None and self.transition_target is not None:
+            t = self.transition_progress
+            center = (1.0 - t) * self.center_embedding + t * self.transition_target
+        else:
+            center = self.center_embedding
+
+        e = center.clone()
         for alpha, d in zip(coefficients, self.directions):
             e = e + scale * alpha * d
         return e
+
+    # ------------------------------------------------------------------
+    # Global jump / transition
+    # ------------------------------------------------------------------
+
+    def start_jump(self, anchor_index: int):
+        """Begin a transition toward a global anchor."""
+        if anchor_index < 0 or anchor_index >= len(self.anchor_embeddings):
+            raise ValueError(f"Invalid anchor index: {anchor_index}")
+
+        self.transition_target = self.anchor_embeddings[anchor_index]
+        self.transition_target_prompt = self.anchor_prompts[anchor_index]
+        self.transition_progress = 0.0
+        print(f"[engine] Starting jump to anchor {anchor_index}: "
+              f"'{self.transition_target_prompt[:60]}...'")
+
+    def step_transition(self, step_size: float = 0.1) -> bool:
+        """
+        Advance the transition by one step.
+
+        Returns True when the transition is complete (progress >= 1.0).
+        """
+        if self.transition_progress is None:
+            return True  # no active transition
+
+        self.transition_progress = min(1.0, self.transition_progress + step_size)
+        return self.transition_progress >= 1.0
+
+    def complete_jump(self):
+        """
+        Finalize the jump: set center to target, clear transition state.
+
+        After calling this, the caller should rebuild local axes + anchors
+        around the new center prompt via recenter().
+        """
+        if self.transition_target is not None:
+            self.center_embedding = self.transition_target.clone()
+            self.center_prompt = self.transition_target_prompt
+            print(f"[engine] Jump complete. New center: '{self.center_prompt[:60]}...'")
+
+        self.transition_progress = None
+        self.transition_target = None
+        self.transition_target_prompt = ""
+
+    def recenter(self, new_axes: list[dict], new_anchors: list[dict]):
+        """
+        Rebuild local axes and global anchors around the current center.
+
+        Called after complete_jump(). The center_embedding is already set;
+        this re-encodes the axis pairs and anchor prompts.
+        """
+        t0 = time.time()
+
+        # Re-encode local directions around the new center
+        raw_directions = []
+        for i, pair in enumerate(new_axes):
+            label = pair.get("label", f"axis-{i}")
+            print(f"[engine] Re-encoding axis {i + 1}/{len(new_axes)}: {label}")
+            e_pos = self.encode_prompt(pair["positive"])
+            e_neg = self.encode_prompt(pair["negative"])
+            raw_directions.append(e_pos - e_neg)
+
+        self.directions = self._gram_schmidt(raw_directions)
+
+        # Re-encode global anchors
+        self.encode_anchors(new_anchors)
+
+        dt = time.time() - t0
+        print(f"[engine] Recentered in {dt:.1f}s "
+              f"({len(self.directions)} axes, {len(self.anchor_embeddings)} anchors)")
 
     # ------------------------------------------------------------------
     # Image generation
