@@ -170,14 +170,17 @@ class LatentEngine:
         Gram-Schmidt orthogonalization on embedding tensors.
 
         Flattens each tensor to 1D, orthogonalizes in float32 for numerical
-        stability, normalizes, then reshapes back to the original shape and
-        casts to the working dtype.
+        stability, then rescales each orthogonal direction to preserve the
+        original magnitude of (E_pos - E_neg). This is crucial: without it,
+        unit-norm vectors in ~1.5M-dimensional space have per-component
+        magnitude ~1e-3, making latent navigation invisible.
         """
         if not vectors:
             return []
 
         shape = vectors[0].shape
         flat = [v.reshape(-1).to(torch.float32) for v in vectors]
+        orig_norms = [torch.linalg.norm(v) for v in flat]
 
         ortho = []
         for v in flat:
@@ -188,7 +191,11 @@ class LatentEngine:
                 v = v / norm
             ortho.append(v)
 
-        return [v.reshape(shape).to(self.dtype) for v in ortho]
+        # Rescale to preserve the natural magnitude of each semantic axis
+        return [
+            (v * n).reshape(shape).to(self.dtype)
+            for v, n in zip(ortho, orig_norms)
+        ]
 
     # ------------------------------------------------------------------
     # Embedding math
@@ -238,7 +245,7 @@ class LatentEngine:
                 height=size,
                 width=size,
                 num_inference_steps=steps,
-                latents=latents,
+                latents=latents.clone(),  # clone to prevent in-place corruption
             )
 
         img = result.images[0]

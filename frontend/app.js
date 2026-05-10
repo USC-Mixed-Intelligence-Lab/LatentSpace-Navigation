@@ -586,6 +586,16 @@ settingsToggle.addEventListener("click", () => {
   settingsPanel.classList.toggle("hidden");
 });
 
+// Help / controls guide toggle
+const helpToggle = $("#help-toggle");
+const helpContent = $("#help-content");
+helpToggle.addEventListener("click", () => {
+  helpContent.classList.toggle("hidden");
+  helpToggle.textContent = helpContent.classList.contains("hidden")
+    ? "? Controls Guide"
+    : "▾ Hide Guide";
+});
+
 scaleSlider.addEventListener("input", () => {
   scaleValue.textContent = parseFloat(scaleSlider.value).toFixed(1);
   wsSend({ type: "set_scale", scale: parseFloat(scaleSlider.value) });

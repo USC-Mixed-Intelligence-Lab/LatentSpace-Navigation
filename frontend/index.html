@@ -94,6 +94,35 @@
           <button class="mode-btn" data-mode="gamepad" id="mode-gamepad" title="Controller">🎮</button>
         </div>
         <div id="input-status" class="input-status-text">Using manual sliders</div>
+        <button id="help-toggle" class="help-toggle-btn">? Controls Guide</button>
+        <div id="help-content" class="help-content hidden">
+          <div class="help-section">
+            <h4>🎚️ Sliders</h4>
+            <p>Drag each axis slider to move along that semantic direction. Negative values push toward the "−" pole, positive toward "+".</p>
+          </div>
+          <div class="help-section">
+            <h4>🖐️ Hand Tracking</h4>
+            <table class="help-table">
+              <tr><td class="help-gesture">Palm left / right</td><td>Axis 1 (style)</td></tr>
+              <tr><td class="help-gesture">Palm up / down</td><td>Axis 2 (texture)</td></tr>
+              <tr><td class="help-gesture">Palm close / far</td><td>Axis 3 (mood)</td></tr>
+              <tr><td class="help-gesture">Tilt hand</td><td>Axis 4 (lighting)</td></tr>
+              <tr><td class="help-gesture">Spread fingers</td><td>Axis 5 (composition)</td></tr>
+              <tr><td class="help-gesture">Pinch thumb + index</td><td>Axis 6 (abstraction)</td></tr>
+            </table>
+          </div>
+          <div class="help-section">
+            <h4>🎮 Gamepad</h4>
+            <table class="help-table">
+              <tr><td class="help-gesture">Left stick X / Y</td><td>Axes 1 & 2</td></tr>
+              <tr><td class="help-gesture">Right stick X / Y</td><td>Axes 3 & 4</td></tr>
+              <tr><td class="help-gesture">L2 / R2 triggers</td><td>Axes 5 & 6</td></tr>
+            </table>
+          </div>
+          <div class="help-section help-tip">
+            <p>💡 Stop moving for 1.5s to auto-render in high quality (1024²). Use the ⚙ panel to adjust scale and smoothing.</p>
+          </div>
+        </div>
       </div>
 
       <!-- Settings (collapsible) -->

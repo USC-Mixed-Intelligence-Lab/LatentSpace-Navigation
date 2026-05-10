@@ -584,6 +584,70 @@ input[type="range"]::-webkit-slider-thumb:hover {
   min-width: 32px;
 }
 
+/* ------ Help / Controls Guide ------ */
+.help-toggle-btn {
+  width: 100%;
+  background: rgba(100, 100, 180, 0.1);
+  border: 1px dashed rgba(100, 100, 180, 0.3);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 6px 0;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: all 0.2s;
+}
+.help-toggle-btn:hover {
+  background: rgba(100, 100, 180, 0.2);
+  color: var(--text-primary);
+}
+
+.help-content {
+  margin-top: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.help-section {
+  margin-bottom: 10px;
+}
+.help-section h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 4px 0;
+}
+.help-section p {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.help-table td {
+  padding: 3px 4px;
+  color: var(--text-muted);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.help-table .help-gesture {
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.help-tip {
+  background: rgba(100, 100, 180, 0.08);
+  border-radius: 6px;
+  padding: 8px;
+}
+.help-tip p {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 /* ------ Axes Placeholder ------ */
 .axes-placeholder {
   font-size: 12px;
