@@ -44,12 +44,12 @@ class LatentEngine:
         # --- Compile with max-autotune ---
         print("[engine] Compiling transformer + VAE (max-autotune, this takes a while)...")
         self.pipe.transformer = torch.compile(
-            self.pipe.transformer, mode="max-autotune"
+            self.pipe.transformer, mode="max-autotune-no-cudagraphs"
         )
-        self.pipe.vae = torch.compile(self.pipe.vae, mode="max-autotune")
+        self.pipe.vae = torch.compile(self.pipe.vae, mode="max-autotune-no-cudagraphs")
         if hasattr(self.pipe, "text_encoder") and self.pipe.text_encoder is not None:
             self.pipe.text_encoder = torch.compile(
-                self.pipe.text_encoder, mode="max-autotune"
+                self.pipe.text_encoder, mode="max-autotune-no-cudagraphs"
             )
 
         # --- Pre-compute fixed noise ---
