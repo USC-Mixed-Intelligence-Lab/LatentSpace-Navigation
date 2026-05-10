@@ -145,11 +145,12 @@ async def websocket_endpoint(ws: WebSocket):
 
                 coeffs = msg["coefficients"]
 
-                # Server-side LERP smoothing
-                lerp_factor = 0.15
+                # Use client values directly — the frontend already applies
+                # LERP smoothing before sending, so no server-side smoothing
+                # is needed (double-smoothing would dampen the signal to ~2%).
                 for i in range(len(smoothed)):
                     if i < len(coeffs):
-                        smoothed[i] += lerp_factor * (coeffs[i] - smoothed[i])
+                        smoothed[i] = coeffs[i]
 
                 generating = True
                 try:

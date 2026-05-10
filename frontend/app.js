@@ -124,13 +124,6 @@ function handleServerMessage(msg) {
     case "jump_complete":
       jumping = false;
       enableConceptButtons(true);
-      // Reset slider UI to zero
-      coefficients.fill(0);
-      smoothed.fill(0);
-      for (let i = 0; i < NUM_AXES; i++) {
-        const slider = document.getElementById(`axis-slider-${i}`);
-        if (slider) slider.value = "0";
-      }
       // Update current concept label
       if (msg.prompt && currentConcept) {
         currentConcept.textContent = `📍 ${msg.prompt.slice(0, 60)}`;
@@ -222,6 +215,15 @@ function updateAxesUI(axes) {
     row.appendChild(val);
     axesList.appendChild(row);
   });
+
+  // Sync slider UI to current state (important after concept jumps —
+  // axes are regenerated but coefficient values may be preserved)
+  for (let i = 0; i < axes.length; i++) {
+    const slider = document.getElementById(`axis-slider-${i}`);
+    const valEl = document.getElementById(`axis-val-${i}`);
+    if (slider) slider.value = smoothed[i] || 0;
+    if (valEl) valEl.textContent = (smoothed[i] || 0).toFixed(2);
+  }
 
   initialized = true;
 }
@@ -606,8 +608,8 @@ function mainLoop() {
     hqPending = true;
   }
 
-  // Send coefficients if initialized and any non-zero
-  if (initialized && connected) {
+  // Send coefficients if initialized, connected, and not mid-jump
+  if (initialized && connected && !jumping) {
     const hasSignal = smoothed.some((v) => Math.abs(v) > 0.01);
     if (moving || hasSignal) {
       wsSend({ type: "move", coefficients: Array.from(smoothed) });
