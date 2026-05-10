@@ -584,6 +584,15 @@ input[type="range"]::-webkit-slider-thumb:hover {
   min-width: 32px;
 }
 
+/* ------ Axes Placeholder ------ */
+.axes-placeholder {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  text-align: center;
+  padding: 16px 0;
+}
+
 /* ------ Utilities ------ */
 .hidden { display: none !important; }
 

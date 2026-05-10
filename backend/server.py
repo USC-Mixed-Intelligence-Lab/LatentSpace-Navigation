@@ -44,6 +44,17 @@ def get_axes_module():
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 app = FastAPI(title="Latent Space Navigator")
+
+# Allow cross-origin requests (needed for ngrok tunnels, Cloud Run, etc.)
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 
@@ -226,4 +237,12 @@ if __name__ == "__main__":
     # Pre-load engine at startup
     get_engine()
 
-    uvicorn.run(app, host=args.host, port=args.port)
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+        ws_ping_interval=30,
+        ws_ping_timeout=30,
+    )

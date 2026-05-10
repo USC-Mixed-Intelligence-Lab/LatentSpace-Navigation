@@ -9,7 +9,8 @@
 // Config
 // ============================================================
 
-const WS_URL = `ws://${location.host}/ws`;
+const WS_PROTO = location.protocol === "https:" ? "wss" : "ws";
+const WS_URL = `${WS_PROTO}://${location.host}/ws`;
 const NUM_AXES = 6;
 const DEFAULT_LABELS = ["style", "texture", "mood", "lighting", "composition", "abstraction"];
 const AXIS_COLORS = ["#ff6b8a", "#ff9f43", "#ffd93d", "#6bff8a", "#43c6ff", "#b76bff"];
