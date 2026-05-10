@@ -130,9 +130,9 @@ async def websocket_endpoint(ws: WebSocket):
 
                 # --- Generate initial image at origin ---
                 await send_status("Generating base image...")
-                embeds, pooled = get_engine().compute_embedding([0.0] * 6, scale)
+                embeds = get_engine().compute_embedding([0.0] * 6, scale)
                 jpeg = await loop.run_in_executor(
-                    None, get_engine().generate, embeds, pooled, "preview"
+                    None, get_engine().generate, embeds, "preview"
                 )
                 await send_image(jpeg)
                 await send_status("Ready — move to explore!")
@@ -153,11 +153,11 @@ async def websocket_endpoint(ws: WebSocket):
 
                 generating = True
                 try:
-                    embeds, pooled = get_engine().compute_embedding(smoothed, scale)
+                    embeds = get_engine().compute_embedding(smoothed, scale)
                     loop = asyncio.get_event_loop()
                     t0 = time.time()
                     jpeg = await loop.run_in_executor(
-                        None, get_engine().generate, embeds, pooled, "preview"
+                        None, get_engine().generate, embeds, "preview"
                     )
                     dt = time.time() - t0
                     await send_image(jpeg)
@@ -172,11 +172,11 @@ async def websocket_endpoint(ws: WebSocket):
             # ---- High-quality render ----
             elif msg_type == "render_hq":
                 await send_status("Rendering high quality...")
-                embeds, pooled = get_engine().compute_embedding(smoothed, scale)
+                embeds = get_engine().compute_embedding(smoothed, scale)
                 loop = asyncio.get_event_loop()
                 t0 = time.time()
                 jpeg = await loop.run_in_executor(
-                    None, get_engine().generate, embeds, pooled, "final"
+                    None, get_engine().generate, embeds, "final"
                 )
                 dt = time.time() - t0
                 await send_image(jpeg)
@@ -206,9 +206,9 @@ async def websocket_endpoint(ws: WebSocket):
                     zero_coeffs = [0.0] * 6
                     for step in range(jump_steps):
                         done = get_engine().step_transition(step_size=step_size)
-                        embeds, pooled = get_engine().compute_embedding(zero_coeffs, scale)
+                        embeds = get_engine().compute_embedding(zero_coeffs, scale)
                         jpeg = await loop.run_in_executor(
-                            None, get_engine().generate, embeds, pooled, "preview"
+                            None, get_engine().generate, embeds, "preview"
                         )
                         await send_image(jpeg)
                         if done:
@@ -240,9 +240,9 @@ async def websocket_endpoint(ws: WebSocket):
 
                     # Reset sliders to origin and generate a frame at the new center
                     smoothed = [0.0] * 6
-                    embeds, pooled = get_engine().compute_embedding([0.0] * 6, scale)
+                    embeds = get_engine().compute_embedding([0.0] * 6, scale)
                     jpeg = await loop.run_in_executor(
-                        None, get_engine().generate, embeds, pooled, "preview"
+                        None, get_engine().generate, embeds, "preview"
                     )
                     await send_image(jpeg)
 
@@ -277,9 +277,9 @@ async def websocket_endpoint(ws: WebSocket):
                 await send_status(f"Axis '{label}' updated.")
 
                 # Re-generate preview at current position
-                embeds, pooled = get_engine().compute_embedding(smoothed, scale)
+                embeds = get_engine().compute_embedding(smoothed, scale)
                 jpeg = await loop.run_in_executor(
-                    None, get_engine().generate, embeds, pooled, "preview"
+                    None, get_engine().generate, embeds, "preview"
                 )
                 await send_image(jpeg)
 
